@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data / model artifacts (too large for git)
+*.parquet
+*.joblib
+*.joblib.tmp
+*.csv
+*.json
+!pyproject.toml
+sarcasm_kaggle_utils.py
+
+# Saved model adapters and checkpoints
+deberta_v3_base_context_free_lora_adapter/
+deberta_v3_base_context_aware_lora_adapter/
+*_trainer/
+
+# Outputs
+*.zip
+*.pdf
+*.png
+confusion_matrix_*.png
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
