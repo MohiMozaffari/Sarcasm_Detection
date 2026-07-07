@@ -4,7 +4,7 @@ End-to-end sarcasm detection on the [danofer/sarcasm](https://www.kaggle.com/dat
 
 ## Quick start
 
-Open **`sarcasm_detection_unified.ipynb`** and run all cells top-to-bottom on a Kaggle GPU (T4 or better). The notebook is fully self-contained — no separate files or imports needed.
+Open **`sarcasm-detection.ipynb`** and run all cells top-to-bottom on a Kaggle GPU (T4 or better). The notebook is fully self-contained — no separate files or imports needed.
 
 ```
 Attach dataset: danofer/sarcasm  →  /kaggle/input/
