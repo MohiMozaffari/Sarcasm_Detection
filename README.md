@@ -12,6 +12,32 @@ Enable GPU accelerator
 Run All
 ```
 
+Training both transformers on the full data needs more than one Kaggle GPU session, so the notebook runs in sessions. Each session stops training before `session_time_budget_hours` (11 h; Kaggle stops GPU sessions at 12 h), saves a checkpoint, and still writes its outputs. To continue, attach the previous session's output as an input and run all cells again: finished stages are reloaded and interrupted training resumes from its last checkpoint. The last cell prints `Pipeline complete.` when nothing is left.
+
+---
+
+## Results
+
+Full-data run on Kaggle (2×T4), evaluated once on the held-out test split (151,496 comments, 50 % sarcastic).
+
+| Model | Accuracy | Precision | Recall | F1 | ROC-AUC | Avg. precision |
+|-------|----------|-----------|--------|----|---------|----------------|
+| TF-IDF + Logistic Regression | 0.722 | 0.739 | 0.686 | 0.712 | 0.795 | 0.801 |
+| DeBERTa-v3 LoRA, context-free | 0.710 | 0.670 | 0.825 | 0.740 | 0.809 | 0.821 |
+| DeBERTa-v3 LoRA, context-aware | 0.731 | 0.696 | 0.822 | 0.753 | 0.826 | 0.834 |
+| Retrieval-augmented stacker | **0.745** | **0.709** | **0.830** | **0.765** | **0.839** | **0.846** |
+
+- The thresholds were tuned for F1 on the validation split: 0.5 for TF-IDF and 0.355 for the other three models (the F1 curve is flat between about 0.33 and 0.37). ROC-AUC and average precision don't depend on the threshold. The low threshold trades precision for recall, which is why the context-free model has a higher F1 than TF-IDF but lower accuracy.
+- Parent context helps. On the test split, the context-aware model is right where the context-free one is wrong for 13,402 comments, and the reverse happens for 10,172 (a net gain of 3,230).
+- Most of the stacker's gain comes from combining TF-IDF with the context-aware model, which get the largest stacker weights. The retrieval features add little: kNN retrieval on its own reaches only 0.609 ROC-AUC.
+- Both DeBERTa models trained the full 2 epochs (22,094 steps) without early stopping. Validation ROC-AUC was still rising at the end (context-aware: 0.825).
+- Only about 0.8 % of comment pairs exceed 256 tokens, so the sliding window rarely comes into play.
+
+An earlier full-data run (July 2026) produced models worse than the TF-IDF baseline (context-free ROC-AUC 0.741). Those models were discarded and retrained after three fixes:
+- **Precision:** a T4 reports bf16 support through emulation, so training had run in pure bf16. It now uses FP16 mixed precision with FP32 weights.
+- **Session budget:** the time budget now ends training before Kaggle's 12-hour limit.
+- **Best-checkpoint selection:** the best checkpoint is now chosen by ROC-AUC instead of F1 at 0.5.
+
 ---
 
 ## Models
@@ -33,10 +59,12 @@ Run All
 | Dropout | 0.05 |
 | Target modules | `query_proj`, `key_proj`, `value_proj` |
 | Modules to save | `classifier`, `pooler` |
-| Epochs | 2 (early stopping, patience=2) |
+| Epochs | 2 (early stopping on validation ROC-AUC, patience=2) |
 | Learning rate | 2e-4 |
 | Batch size | 8 per device (×4 gradient accumulation) |
-| Precision | BF16 / FP16 auto-detected |
+| Precision | BF16 where the GPU runs it natively (Ampere+), otherwise FP16 mixed precision with FP32 weights (T4) |
+| Gradient checkpointing | Off (fits a T4; ~30 % faster) |
+| In-training evaluation | 20 k-row stratified validation subset every 3000 steps; final metrics use the full splits |
 
 ---
 
@@ -58,7 +86,7 @@ Stratified 70 / 15 / 15 split on the full cleaned dataset (~1 M Reddit comments)
 |---|---|
 | Install dependencies | `pip install` all required packages |
 | Shared utility definitions | All helper classes and functions defined inline |
-| Configuration | `SarcasmConfig` — set `debug=True` for a 20 k-row CPU smoke test |
+| Configuration | `SarcasmConfig` — set `debug=True` for a 20 k-row smoke test; restores finished stages and checkpoints from an attached earlier session |
 | Step 1 — Data | Load CSV, clean text, create splits, length diagnostics |
 | Step 2 — TF-IDF | Train baseline on full training split |
 | Steps 3 & 4 — DeBERTa LoRA | Both transformer models trained with PEFT LoRA on full data |
@@ -91,7 +119,7 @@ Stratified 70 / 15 / 15 split on the full cleaned dataset (~1 M Reddit comments)
 
 ## Sliding-window inference (context-aware model)
 
-For `parent_comment + comment` pairs that exceed 256 tokens, the parent context is divided into overlapping windows (stride = 64, max 4 windows). Each window is concatenated with the full reply and forwarded through the model; the resulting logits are averaged to produce a single prediction per example.
+For `parent_comment + comment` pairs that exceed 256 tokens, the parent context is divided into overlapping windows (stride = 64, max 4 windows). Each window is concatenated with the full reply and forwarded through the model; the resulting logits are averaged to produce a single prediction per example. A reply that alone would fill the budget is truncated so every window keeps at least 32 parent tokens.
 
 ---
 
@@ -137,4 +165,4 @@ pip install transformers accelerate peft datasets evaluate sentencepiece safeten
 
 ## Reproducing results
 
-All random seeds are fixed at `42`. Set `deterministic=True` in `set_all_seeds()` for exact GPU reproducibility (slower). The full pipeline on a Kaggle T4 takes approximately 3–4 hours.
+All random seeds are fixed at `42`. Set `deterministic=True` in `set_all_seeds()` for exact GPU reproducibility (slower). The results above took three Kaggle sessions on 2×T4, about 21 GPU hours in total. At normal speed each DeBERTa model needs about 7 h of training, but session speed varies: one session ran about 2.5× slower. See Quick start for how sessions resume.
